@@ -19,6 +19,7 @@ use std::time::Duration;
 
 use base64;
 use bytes::Bytes;
+use chrono::{Date, DateTime, Utc};
 use hex;
 use hmac::{Hmac, Mac, NewMac};
 use http::header::{HeaderMap, HeaderName, HeaderValue};
@@ -28,7 +29,6 @@ use log::{debug, log_enabled, Level::Debug};
 use md5;
 use percent_encoding::{percent_decode, utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use sha2::{Digest, Sha256};
-use time::{Date, OffsetDateTime};
 
 use crate::credential::AwsCredentials;
 use crate::region::Region;
@@ -286,7 +286,7 @@ impl SignedRequest {
         self.sign(creds);
         let hostname = self.hostname();
 
-        let current_time = OffsetDateTime::now_utc();
+        let current_time = Utc::now();
         let current_time_fmted = current_time.format("%Y%m%dT%H%M%SZ");
         let current_date = current_time.format("%Y%m%d");
 
@@ -332,7 +332,7 @@ impl SignedRequest {
             .insert("X-Amz-SignedHeaders".into(), Some(signed_headers.clone()));
 
         self.params
-            .insert("X-Amz-Date".into(), current_time_fmted.into());
+            .insert("X-Amz-Date".into(), Some(current_time_fmted.to_string()));
 
         self.canonical_query_string = build_canonical_query_string(&self.params);
 
@@ -436,9 +436,9 @@ impl SignedRequest {
     /// Authorization header uses AWS4-HMAC-SHA256 for signing.
     pub fn sign(&mut self, creds: &AwsCredentials) {
         self.complement();
-        let date = OffsetDateTime::now_utc();
+        let date = Utc::now();
         self.remove_header("x-amz-date");
-        self.add_header("x-amz-date", &date.format("%Y%m%dT%H%M%SZ"));
+        self.add_header("x-amz-date", &date.format("%Y%m%dT%H%M%SZ").to_string());
 
         if let Some(ref token) = *creds.token() {
             self.remove_header("X-Amz-Security-Token");
@@ -594,11 +594,11 @@ fn hmac(secret: &[u8], message: &[u8]) -> Hmac<Sha256> {
 fn sign_string(
     string_to_sign: &str,
     secret: &str,
-    date: Date,
+    date: Date<Utc>,
     region: &str,
     service: &str,
 ) -> String {
-    let date_str = date.format("%Y%m%d");
+    let date_str = date.format("%Y%m%d").to_string();
     let date_hmac = hmac(format!("AWS4{}", secret).as_bytes(), date_str.as_bytes())
         .finalize()
         .into_bytes();
@@ -619,7 +619,7 @@ fn sign_string(
 }
 
 /// Mark string as AWS4-HMAC-SHA256 hashed
-pub fn string_to_sign(date: OffsetDateTime, hashed_canonical_request: &str, scope: &str) -> String {
+pub fn string_to_sign(date: DateTime<Utc>, hashed_canonical_request: &str, scope: &str) -> String {
     format!(
         "AWS4-HMAC-SHA256\n{}\n{}\n{}",
         date.format("%Y%m%dT%H%M%SZ"),
